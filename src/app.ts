@@ -1,0 +1,168 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
+import express from 'express';
+import cors from 'cors';
+import path from 'path';
+import fs from 'fs';
+import authRoutes from './routes/authRoutes.js';
+import clientRoutes from './routes/clientRoutes.js';
+import caseRoutes from './routes/caseRoutes.js';
+import docRoutes from './routes/docRoutes.js';
+import taskRoutes from './routes/taskRoutes.js';
+import aiRoutes from './routes/aiRoutes.js';
+import paymentRoutes from './routes/paymentRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
+import appointmentRoutes from './routes/appointmentRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
+import templateRoutes from './routes/templateRoutes.js';
+import settingRoutes from './routes/settingRoutes.js';
+import userRoutes from './routes/userRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
+
+// Seed API endpoint for easy developer verification
+import { seed } from './config/seed.js';
+import { execSync } from 'child_process';
+// Safe initialization on startup (preserves existing data)
+seed(false).catch(err => console.warn('Database initialization warning:', err.message || err));
+
+const app = express();
+const port = process.env.PORT || 5000;
+
+const allowedOrigins = [
+  'https://casemanagementproject1.netlify.app',
+  'https://casemanagementcode.netlify.app',
+  'https://thriving-sunburst-6e4b14.netlify.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5174',
+  'http://localhost:5000',
+  'http://localhost:5001',
+  'http://localhost:5005'
+];
+
+if (process.env.FRONTEND_URL) {
+  const customOrigin = process.env.FRONTEND_URL.replace(/\/$/, '');
+  if (!allowedOrigins.includes(customOrigin)) {
+    allowedOrigins.push(customOrigin);
+  }
+}
+
+// Global CORS response header middleware (handles OPTIONS preflight & standard requests)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Access-Control-Allow-Origin, X-User-Role');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin', 'X-User-Role'],
+  optionsSuccessStatus: 200
+};
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+app.use(cors(corsOptions));
+app.use(express.json());
+app.use('/uploads', express.static(uploadsDir));
+
+// Custom middleware to catch JSON syntax errors from body-parser gracefully (400 instead of 500)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof SyntaxError && 'body' in err && (err as any).status === 400) {
+    return res.status(400).json({
+      success: false,
+      error: 'Invalid JSON payload in request body. Ensure keys and strings are enclosed in valid double quotes.'
+    });
+  }
+  next(err);
+});
+
+import { prisma } from './config/db.js';
+
+// Main routers
+app.use('/api/auth', authRoutes);
+app.use('/api/clients', clientRoutes);
+app.use('/api/cases', caseRoutes);
+app.use('/api/documents', docRoutes);
+app.use('/api/tasks', taskRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/messages', messageRoutes);
+app.use('/api/appointments', appointmentRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/templates', templateRoutes);
+app.use('/api/settings', settingRoutes);
+app.use('/api/reports', reportRoutes);
+app.use('/api/users', userRoutes);
+
+// Seed API endpoint for easy developer verification
+app.get('/api/seed', async (req, res) => {
+  try {
+    try {
+      execSync('npx prisma db push --accept-data-loss', { stdio: 'inherit' });
+    } catch (dbPushErr: any) {
+      console.warn('DB Push in seed endpoint warning:', dbPushErr.message || dbPushErr);
+    }
+    await seed();
+    const counts = {
+      users: await prisma.user.count(),
+      clients: await prisma.client.count(),
+      cases: await prisma.case.count(),
+      recommenders: await prisma.recommender.count(),
+      documents: await prisma.document.count(),
+      tasks: await prisma.task.count(),
+      payments: await prisma.payment.count(),
+      messages: await prisma.message.count(),
+      appointments: await prisma.appointment.count()
+    };
+    return res.json({
+      success: true,
+      message: 'Database seeded / checked successfully.',
+      counts
+    });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Root route
+app.get('/', (req, res) => {
+  res.json({ message: 'Case Management System Backend API is active.' });
+});
+
+// Error handling middleware
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error(err.stack);
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.status(500).json({ success: false, error: err.message || 'Internal Server Error' });
+});
+
+app.listen(Number(port), '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`);
+});
+
+export default app;
